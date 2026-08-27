@@ -35,7 +35,7 @@ public class Game : GameWindow
             0.2f,
             1.0f);
 
-        CreateVertex();
+        CreateTriangle();
         CreateShaderProgram();
     }
 
@@ -48,12 +48,12 @@ public class Game : GameWindow
         GL.UseProgram(_shaderProgram);
         GL.BindVertexArray(_vertexArrayObject);
 
-        GL.PointSize(16.0f);
+        //GL.PointSize(16.0f);
 
         GL.DrawArrays(
-            PrimitiveType.Points,
+            PrimitiveType.Triangles,
             0,
-            1);
+            3);
 
         SwapBuffers();
     }
@@ -69,18 +69,22 @@ public class Game : GameWindow
             e.Height);
     }
 
-    private void CreateVertex()
+    private void CreateTriangle()
     {
         float[] vertices =
         {
-        0.0f, 0.0f, 0.0f
-        };
+        // X      Y      Z
+        -0.5f, -0.5f, 0.0f,
+         0.0f,  0.5f, 0.0f
+    };
 
         _vertexArrayObject = GL.GenVertexArray();
         GL.BindVertexArray(_vertexArrayObject);
 
         _vertexBufferObject = GL.GenBuffer();
-        GL.BindBuffer(BufferTarget.ArrayBuffer, _vertexBufferObject);
+        GL.BindBuffer(
+            BufferTarget.ArrayBuffer,
+            _vertexBufferObject);
 
         GL.BufferData(
             BufferTarget.ArrayBuffer,
