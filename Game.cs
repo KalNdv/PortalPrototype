@@ -75,6 +75,7 @@ public class Game : GameWindow
         {
         // X      Y      Z
         -0.5f, -0.5f, 0.0f,
+         0.5f, -0.5f, 0.0f,
          0.0f,  0.5f, 0.0f
     };
 
