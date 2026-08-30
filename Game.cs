@@ -10,6 +10,7 @@ public class Game : GameWindow
     // Very verbose variables, but I'm new to this, so I'll be verbose so I don't lose myself
     private int _vertexArrayObject;
     private int _vertexBufferObject;
+    private int _elementBufferObject;
     private int _shaderProgram;
 
     public Game(
@@ -35,8 +36,18 @@ public class Game : GameWindow
             0.2f,
             1.0f);
 
-        CreateTriangle();
+        CreateQuad();
         CreateShaderProgram();
+    }
+
+    protected override void OnUnload()
+    {
+        base.OnUnload();
+
+        GL.DeleteBuffer(_elementBufferObject);
+        GL.DeleteBuffer(_vertexBufferObject);
+        GL.DeleteVertexArray(_vertexArrayObject);
+        GL.DeleteProgram(_shaderProgram);
     }
 
     protected override void OnRenderFrame(FrameEventArgs args)
@@ -50,10 +61,11 @@ public class Game : GameWindow
 
         //GL.PointSize(16.0f);
 
-        GL.DrawArrays(
+        GL.DrawElements(
             PrimitiveType.Triangles,
-            0,
-            3);
+            6,
+            DrawElementsType.UnsignedInt,
+            0);
 
         SwapBuffers();
     }
@@ -69,20 +81,29 @@ public class Game : GameWindow
             e.Height);
     }
 
-    private void CreateTriangle()
+    private void CreateQuad()
     {
         float[] vertices =
         {
             // X Y Z R G B
-            -0.5f, -0.5f, 0.0f,   0.0f, 1.0f, 0.0f,
-            0.5f, -0.5f, 0.0f,   0.0f, 0.0f, 1.0f,
-            0.0f,  0.5f, 0.0f,   1.0f, 0.0f, 0.0f
+            -0.5f, -0.5f, 0.0f,     1.0f, 0.0f, 0.0f,
+            0.5f, -0.5f, 0.0f,      0.0f, 1.0f, 0.0f,
+            0.5f,  0.5f, 0.0f,      0.0f, 0.0f, 1.0f,
+            -0.5f,  0.5f, 0.0f,     1.0f, 1.0f, 0.0f
+        };
+
+        uint[] indices =
+        {
+            // 2 tris -> quad, would be cool if I could import .obj/.fbx files eventually...
+            0, 1, 2,
+            2, 3, 0
         };
 
         _vertexArrayObject = GL.GenVertexArray();
         GL.BindVertexArray(_vertexArrayObject);
 
         _vertexBufferObject = GL.GenBuffer();
+
         GL.BindBuffer(
             BufferTarget.ArrayBuffer,
             _vertexBufferObject);
@@ -93,7 +114,18 @@ public class Game : GameWindow
             vertices,
             BufferUsageHint.StaticDraw);
 
-        // Position attribute
+        _elementBufferObject = GL.GenBuffer();
+
+        GL.BindBuffer(
+            BufferTarget.ElementArrayBuffer,
+            _elementBufferObject);
+
+        GL.BufferData(
+            BufferTarget.ElementArrayBuffer,
+            indices.Length * sizeof(uint),
+            indices,
+            BufferUsageHint.StaticDraw);
+
         GL.VertexAttribPointer(
             0,
             3,
@@ -104,7 +136,6 @@ public class Game : GameWindow
 
         GL.EnableVertexAttribArray(0);
 
-        // Color attribute
         GL.VertexAttribPointer(
             1,
             3,
