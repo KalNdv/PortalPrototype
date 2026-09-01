@@ -1,8 +1,11 @@
 using OpenTK;
 using OpenTK.Graphics.OpenGL4;
+using OpenTK.Mathematics;
 using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Desktop;
-using OpenTK.Mathematics;
+using OpenTK.Windowing.GraphicsLibraryFramework;
+using System;
+using System.IO;
 
 namespace PortalPrototype;
 
@@ -13,6 +16,11 @@ public class Game : GameWindow
     private int _vertexBufferObject;
     private int _elementBufferObject;
     private int _shaderProgram;
+
+    private Camera _camera = null!;
+
+    private const float CameraMovementSpeed = 3.0f;
+    private const float MouseSensitivity = 0.1f;
 
     public Game(
         GameWindowSettings gameSettings,
@@ -32,7 +40,7 @@ public class Game : GameWindow
             $"GPU: {GL.GetString(StringName.Renderer)}");
 
         GL.Enable(EnableCap.DepthTest);
-        
+
         GL.ClearColor(
             0.1f,
             0.1f,
@@ -41,6 +49,13 @@ public class Game : GameWindow
 
         CreateObject();
         CreateShaderProgram();
+
+        _camera = new Camera(
+            new Vector3(0.0f, 0.0f, 3.0f),
+            ClientSize.X / (float)ClientSize.Y);
+
+        CursorState =
+            OpenTK.Windowing.Common.CursorState.Grabbed;
     }
 
     protected override void OnUnload()
@@ -53,7 +68,93 @@ public class Game : GameWindow
         GL.DeleteProgram(_shaderProgram);
     }
 
-   protected override void OnRenderFrame(
+    protected override void OnUpdateFrame(
+        FrameEventArgs args)
+    {
+        base.OnUpdateFrame(args);
+
+        if (!IsFocused)
+        {
+            return;
+        }
+
+        float deltaTime =
+            (float)args.Time;
+
+        float movementAmount =
+            CameraMovementSpeed *
+            deltaTime;
+
+        if (KeyboardState.IsKeyDown(
+            Keys.Escape))
+        {
+            Close();
+        }
+
+        if (KeyboardState.IsKeyDown(
+            Keys.W))
+        {
+            _camera.Position +=
+                _camera.Front *
+                movementAmount;
+        }
+
+        if (KeyboardState.IsKeyDown(
+            Keys.S))
+        {
+            _camera.Position -=
+                _camera.Front *
+                movementAmount;
+        }
+
+        if (KeyboardState.IsKeyDown(
+            Keys.A))
+        {
+            _camera.Position -=
+                _camera.Right *
+                movementAmount;
+        }
+
+        if (KeyboardState.IsKeyDown(
+            Keys.D))
+        {
+            _camera.Position +=
+                _camera.Right *
+                movementAmount;
+        }
+
+        if (KeyboardState.IsKeyDown(
+            Keys.Space))
+        {
+            _camera.Position +=
+                Vector3.UnitY *
+                movementAmount;
+        }
+
+        if (
+            KeyboardState.IsKeyDown(
+                Keys.LeftControl)
+            ||
+            KeyboardState.IsKeyDown(
+                Keys.C))
+        {
+            _camera.Position -=
+                Vector3.UnitY *
+                movementAmount;
+        }
+
+        Vector2 mouseDelta =
+            MouseState.Delta;
+
+        _camera.Rotate(
+            mouseDelta.X *
+                MouseSensitivity,
+
+            -mouseDelta.Y *
+                MouseSensitivity);
+    }
+
+    protected override void OnRenderFrame(
         FrameEventArgs args)
     {
         base.OnRenderFrame(args);
@@ -71,20 +172,11 @@ public class Game : GameWindow
             Matrix4.CreateRotationY(
                 MathHelper.DegreesToRadians(35.0f));
 
-        Matrix4 view = Matrix4.LookAt(
-            new Vector3(0.0f, 0.0f, 3.0f),
-            Vector3.Zero,
-            Vector3.UnitY);
-
-        float aspectRatio =
-            Size.X / (float)Size.Y;
+        Matrix4 view =
+            _camera.GetViewMatrix();
 
         Matrix4 projection =
-            Matrix4.CreatePerspectiveFieldOfView(
-                MathHelper.DegreesToRadians(60.0f),
-                aspectRatio,
-                0.1f,
-                100.0f);
+            _camera.GetProjectionMatrix();
 
         int modelLocation =
             GL.GetUniformLocation(
@@ -119,6 +211,8 @@ public class Game : GameWindow
         GL.BindVertexArray(
             _vertexArrayObject);
 
+        //GL.PointSize(16.0f);
+
         GL.DrawElements(
             PrimitiveType.Triangles,
             36,
@@ -128,7 +222,8 @@ public class Game : GameWindow
         SwapBuffers();
     }
 
-    protected override void OnResize(ResizeEventArgs e)
+    protected override void OnResize(
+        ResizeEventArgs e)
     {
         base.OnResize(e);
 
@@ -137,6 +232,13 @@ public class Game : GameWindow
             0,
             e.Width,
             e.Height);
+
+        if (_camera is not null &&
+            e.Height > 0)
+        {
+            _camera.AspectRatio =
+                e.Width / (float)e.Height;
+        }
     }
 
     private void CreateObject()
@@ -234,8 +336,8 @@ public class Game : GameWindow
     }
 
     private static int CompileShader(
-    ShaderType type,
-    string source)
+        ShaderType type,
+        string source)
     {
         int shader = GL.CreateShader(type);
 
@@ -282,8 +384,13 @@ public class Game : GameWindow
 
         _shaderProgram = GL.CreateProgram();
 
-        GL.AttachShader(_shaderProgram, vertexShader);
-        GL.AttachShader(_shaderProgram, fragmentShader);
+        GL.AttachShader(
+            _shaderProgram,
+            vertexShader);
+
+        GL.AttachShader(
+            _shaderProgram,
+            fragmentShader);
 
         GL.LinkProgram(_shaderProgram);
 
@@ -295,18 +402,22 @@ public class Game : GameWindow
         if (success == 0)
         {
             string error =
-                GL.GetProgramInfoLog(_shaderProgram);
+                GL.GetProgramInfoLog(
+                    _shaderProgram);
 
             throw new Exception(
                 $"Shader linking failed:\n{error}");
         }
 
-        GL.DetachShader(_shaderProgram, vertexShader);
-        GL.DetachShader(_shaderProgram, fragmentShader);
+        GL.DetachShader(
+            _shaderProgram,
+            vertexShader);
+
+        GL.DetachShader(
+            _shaderProgram,
+            fragmentShader);
 
         GL.DeleteShader(vertexShader);
         GL.DeleteShader(fragmentShader);
     }
 }
-
-
