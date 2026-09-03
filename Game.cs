@@ -24,6 +24,7 @@ public class Game : GameWindow
     private int _modelLocation;
     private int _viewLocation;
     private int _projectionLocation;
+    private int _lightDirectionLocation;
 
     private Camera _camera = null!;
     private const float CameraMovementSpeed = 3.0f;
@@ -78,6 +79,12 @@ public class Game : GameWindow
             GL.GetUniformLocation(
                 _shaderProgram,
                 "projection");
+
+        // Ask OpenGL where the directional light uniform lives.
+        _lightDirectionLocation =
+            GL.GetUniformLocation(
+                _shaderProgram,
+                "lightDirection");
 
         // Create the camera.
         _camera = new Camera(
@@ -208,6 +215,17 @@ public class Game : GameWindow
         // Make the shader program active.
         GL.UseProgram(_shaderProgram);
 
+        // Normalized direction from the surfaces toward the light source.
+        Vector3 lightDirection =
+            Vector3.Normalize(
+                new Vector3(-0.4f, 1.0f, 0.3f));
+
+        GL.Uniform3(
+            _lightDirectionLocation,
+            lightDirection.X,
+            lightDirection.Y,
+            lightDirection.Z);
+
         // world space -> view space.
         Matrix4 view =
             _camera.GetViewMatrix();
@@ -321,7 +339,8 @@ public class Game : GameWindow
             ref model);
 
         // Draw 36 indices as triangles.
-        // 6*2*3 = 36 indexed tris
+        // 6*2 = 12 tris
+        // 12*3 = 36 indices
         GL.DrawElements(
             PrimitiveType.Triangles,
             36,
@@ -332,48 +351,56 @@ public class Game : GameWindow
     // Create the reusable mesh stored on the GPU. Aka, the cube.
     private void CreateObject()
     {
+        // Used to have 8 cube corners, fine for X Y Z R G B, not normals however, so here is this mess
         float[] vertices =
         {
-            // X Y Z R G B
+            // X Y Z, R G B, Normals! (X Y Z)
 
-            // Back
-            -0.5f, -0.5f, -0.5f,    0.0f, 0.0f, 0.0f,
-            0.5f, -0.5f, -0.5f,     1.0f, 0.0f, 0.0f,
-            0.5f,  0.5f, -0.5f,     1.0f, 1.0f, 0.0f,
-            -0.5f,  0.5f, -0.5f,    0.0f, 1.0f, 0.0f,
+            // Front (+Z)
+            -0.5f, -0.5f,  0.5f,        0.2f, 0.5f, 1.0f,       0.0f,  0.0f,  1.0f,
+             0.5f, -0.5f,  0.5f,        0.2f, 0.5f, 1.0f,       0.0f,  0.0f,  1.0f,
+             0.5f,  0.5f,  0.5f,        0.2f, 0.5f, 1.0f,       0.0f,  0.0f,  1.0f,
+            -0.5f,  0.5f,  0.5f,        0.2f, 0.5f, 1.0f,       0.0f,  0.0f,  1.0f,
 
-            // Front
-            -0.5f, -0.5f,  0.5f,    0.0f, 0.0f, 1.0f,
-            0.5f, -0.5f,  0.5f,     1.0f, 0.0f, 1.0f,
-            0.5f,  0.5f,  0.5f,     1.0f, 1.0f, 1.0f,
-            -0.5f,  0.5f,  0.5f,    0.0f, 1.0f, 1.0f
+            // Back (-Z)
+             0.5f, -0.5f, -0.5f,        0.8f, 0.2f, 0.2f,       0.0f,  0.0f, -1.0f,
+            -0.5f, -0.5f, -0.5f,        0.8f, 0.2f, 0.2f,       0.0f,  0.0f, -1.0f,
+            -0.5f,  0.5f, -0.5f,        0.8f, 0.2f, 0.2f,       0.0f,  0.0f, -1.0f,
+             0.5f,  0.5f, -0.5f,        0.8f, 0.2f, 0.2f,       0.0f,  0.0f, -1.0f,
+
+            // Left (-X)
+            -0.5f, -0.5f, -0.5f,        0.2f, 0.8f, 0.3f,      -1.0f,  0.0f,  0.0f,
+            -0.5f, -0.5f,  0.5f,        0.2f, 0.8f, 0.3f,      -1.0f,  0.0f,  0.0f,
+            -0.5f,  0.5f,  0.5f,        0.2f, 0.8f, 0.3f,      -1.0f,  0.0f,  0.0f,
+            -0.5f,  0.5f, -0.5f,        0.2f, 0.8f, 0.3f,      -1.0f,  0.0f,  0.0f,
+
+            // Right (+X)
+             0.5f, -0.5f,  0.5f,        1.0f, 0.5f, 0.2f,       1.0f,  0.0f,  0.0f,
+             0.5f, -0.5f, -0.5f,        1.0f, 0.5f, 0.2f,       1.0f,  0.0f,  0.0f,
+             0.5f,  0.5f, -0.5f,        1.0f, 0.5f, 0.2f,       1.0f,  0.0f,  0.0f,
+             0.5f,  0.5f,  0.5f,        1.0f, 0.5f, 0.2f,       1.0f,  0.0f,  0.0f,
+
+            // Bottom (-Y)
+            -0.5f, -0.5f, -0.5f,        0.6f, 0.3f, 0.8f,       0.0f, -1.0f,  0.0f,
+             0.5f, -0.5f, -0.5f,        0.6f, 0.3f, 0.8f,       0.0f, -1.0f,  0.0f,
+             0.5f, -0.5f,  0.5f,        0.6f, 0.3f, 0.8f,       0.0f, -1.0f,  0.0f,
+            -0.5f, -0.5f,  0.5f,        0.6f, 0.3f, 0.8f,       0.0f, -1.0f,  0.0f,
+
+            // Top (+Y)
+            -0.5f,  0.5f,  0.5f,        0.8f, 0.8f, 0.8f,       0.0f,  1.0f,  0.0f,
+             0.5f,  0.5f,  0.5f,        0.8f, 0.8f, 0.8f,       0.0f,  1.0f,  0.0f,
+             0.5f,  0.5f, -0.5f,        0.8f, 0.8f, 0.8f,       0.0f,  1.0f,  0.0f,
+            -0.5f,  0.5f, -0.5f,        0.8f, 0.8f, 0.8f,       0.0f,  1.0f,  0.0f
         };
 
         uint[] indices =
         {
-            // Back
-            0, 1, 2,
-            2, 3, 0,
-
-            // Front
-            4, 5, 6,
-            6, 7, 4,
-
-            // Left
-            0, 4, 7,
-            7, 3, 0,
-
-            // Right
-            1, 5, 6,
-            6, 2, 1,
-
-            // Bottom
-            0, 1, 5,
-            5, 4, 0,
-
-            // Top
-            3, 2, 6,
-            6, 7, 3
+             0,  1,  2,   2,  3,  0, // Front
+             4,  5,  6,   6,  7,  4, // Back
+             8,  9, 10,  10, 11,  8, // Left
+            12, 13, 14,  14, 15, 12, // Right
+            16, 17, 18,  18, 19, 16, // Bottom
+            20, 21, 22,  22, 23, 20  // Top
         };
 
         // Generate a new VAO handle.
@@ -412,29 +439,50 @@ public class Game : GameWindow
             indices,
             BufferUsageHint.StaticDraw);
 
+        // Each complete vertex now contains 9 floats:
+        // 3 position + 3 color + 3 normal.
+        int vertexStride =
+            9 * sizeof(float);
+
         // Configure vertex attribute 0 = POSITION.
         GL.VertexAttribPointer(
             0,
             3,
             VertexAttribPointerType.Float,
             false,
-            6 * sizeof(float),
+            vertexStride,
             0);
 
         // Enable shader input location 0.
         GL.EnableVertexAttribArray(0);
 
         // Configure vertex attribute 1 = COLOR.
+
+        // The color starts after the 3rd float
         GL.VertexAttribPointer(
             1,
             3,
             VertexAttribPointerType.Float,
             false,
-            6 * sizeof(float),
+            vertexStride,
             3 * sizeof(float));
 
         // Enable shader input location 1.
         GL.EnableVertexAttribArray(1);
+
+        // Configure vertex attribute 2 = NORMAL.
+
+        // The normal starts after the 6th float
+        GL.VertexAttribPointer(
+            2,
+            3,
+            VertexAttribPointerType.Float,
+            false,
+            vertexStride,
+            6 * sizeof(float));
+
+        // Enable shader input location 2.
+        GL.EnableVertexAttribArray(2);
 
         // Unbind the VAO after setup.
         GL.BindVertexArray(0);
