@@ -12,13 +12,18 @@ namespace PortalPrototype;
 // - the shader program,
 // - the camera,
 // - input handling,
-// - the small test scene.
+// - the small test scene,
+// - the first portal surface!!
 public class Game : GameWindow
 {
     // Very verbose variables, but I'm new to this, so I'll be verbose so I don't lose myself
+
+    // Main reusable object mesh.
     private int _vertexArrayObject;
     private int _vertexBufferObject;
     private int _elementBufferObject;
+
+    // Main scene shader.
     private int _shaderProgram;
 
     private int _modelLocation;
@@ -26,9 +31,38 @@ public class Game : GameWindow
     private int _projectionLocation;
     private int _lightDirectionLocation;
 
+    // Separate mesh used only for the portal surface.
+    private int _portalVertexArrayObject;
+    private int _portalVertexBufferObject;
+    private int _portalElementBufferObject;
+
+    // Separate shader used to draw the portal texture onto the portal quad.
+    private int _portalShaderProgram;
+
+    private int _portalModelLocation;
+    private int _portalViewLocation;
+    private int _portalProjectionLocation;
+    private int _portalTextureLocation;
+
+    // Off-screen framebuffer resources.
+    private int _portalFramebuffer;
+    private int _portalColorTexture;
+    private int _portalDepthRenderbuffer;
+
+    // Fixed portal render resolution for now, lower render scale at distance for better performance? Ooo!
+    private const int PortalTextureWidth = 1024;
+    private const int PortalTextureHeight = 1024;
+
     private Camera _camera = null!;
+
+    // Temporary second camera just to prove render-to-texture works.
+    private Camera _portalCamera = null!;
+
     private const float CameraMovementSpeed = 3.0f;
     private const float MouseSensitivity = 0.1f;
+
+    // Tick! Of course, it's just tick + deltaTime... Good for floating cubes.
+    private float _tick;
 
     public Game(
         GameWindowSettings gameSettings,
@@ -41,11 +75,9 @@ public class Game : GameWindow
     {
         base.OnLoad();
 
-        // Print the OpenGL version supplied by the graphics driver.
         Console.WriteLine(
             $"OpenGL: {GL.GetString(StringName.Version)}");
 
-        // Print the GPU OpenGL is currently rendering with.
         Console.WriteLine(
             $"GPU: {GL.GetString(StringName.Renderer)}");
 
@@ -58,40 +90,84 @@ public class Game : GameWindow
             1.0f);
 
         CreateObject();
+        CreatePortalSurface();
 
-        // Load, compile and link the GLSL shaders.
-        CreateShaderProgram();
+        _shaderProgram =
+            CreateShaderProgram(
+                "basic.vert",
+                "basic.frag");
 
-        // Ask OpenGL where the "model" uniform lives inside the linked shader.
+        _portalShaderProgram =
+            CreateShaderProgram(
+                "portal.vert",
+                "portal.frag");
+
         _modelLocation =
             GL.GetUniformLocation(
                 _shaderProgram,
                 "model");
 
-        // Ask OpenGL where the "view" uniform lives.
         _viewLocation =
             GL.GetUniformLocation(
                 _shaderProgram,
                 "view");
 
-        // Ask OpenGL where the "projection" uniform lives.
         _projectionLocation =
             GL.GetUniformLocation(
                 _shaderProgram,
                 "projection");
 
-        // Ask OpenGL where the directional light uniform lives.
         _lightDirectionLocation =
             GL.GetUniformLocation(
                 _shaderProgram,
                 "lightDirection");
 
-        // Create the camera.
+        _portalModelLocation =
+            GL.GetUniformLocation(
+                _portalShaderProgram,
+                "model");
+
+        _portalViewLocation =
+            GL.GetUniformLocation(
+                _portalShaderProgram,
+                "view");
+
+        _portalProjectionLocation =
+            GL.GetUniformLocation(
+                _portalShaderProgram,
+                "projection");
+
+        _portalTextureLocation =
+            GL.GetUniformLocation(
+                _portalShaderProgram,
+                "portalTexture");
+
+        // Tell the portal shader that portalTexture uses texture unit 0.
+        GL.UseProgram(_portalShaderProgram);
+
+        GL.Uniform1(
+            _portalTextureLocation,
+            0);
+
+        GL.UseProgram(0);
+
+        CreatePortalFramebuffer();
+
+        // Player camera.
         _camera = new Camera(
             new Vector3(0.0f, 0.5f, 4.5f),
             ClientSize.X / (float)ClientSize.Y);
 
-        // Lock/grab the mouse cursor inside the window.
+        // Fixed camera used for the portal texture.
+        // New cameras face -Z, so i is rotated 180 degrees to look back into the room.
+        _portalCamera = new Camera(
+            new Vector3(0.0f, 0.5f, -4.5f),
+            PortalTextureWidth / (float)PortalTextureHeight);
+
+        _portalCamera.Rotate(
+            180.0f,
+            0.0f);
+
         CursorState =
             OpenTK.Windowing.Common.CursorState.Grabbed;
     }
@@ -100,17 +176,20 @@ public class Game : GameWindow
     {
         base.OnUnload();
 
-        // Delete the GPU index buffer.
         GL.DeleteBuffer(_elementBufferObject);
-
-        // Delete the GPU vertex buffer.
         GL.DeleteBuffer(_vertexBufferObject);
-
-        // Delete the vertex layout/configuration object.
         GL.DeleteVertexArray(_vertexArrayObject);
 
-        // Delete the linked shader program.
+        GL.DeleteBuffer(_portalElementBufferObject);
+        GL.DeleteBuffer(_portalVertexBufferObject);
+        GL.DeleteVertexArray(_portalVertexArrayObject);
+
         GL.DeleteProgram(_shaderProgram);
+        GL.DeleteProgram(_portalShaderProgram);
+
+        GL.DeleteRenderbuffer(_portalDepthRenderbuffer);
+        GL.DeleteTexture(_portalColorTexture);
+        GL.DeleteFramebuffer(_portalFramebuffer);
     }
 
     // Called repeatedly to update application/game state. Before rendering so logic -> render order is kept.
@@ -119,7 +198,6 @@ public class Game : GameWindow
     {
         base.OnUpdateFrame(args);
 
-        // If the window is not focused, do not process movement/mouse input.
         if (!IsFocused)
         {
             return;
@@ -130,6 +208,9 @@ public class Game : GameWindow
 
         float movementAmount =
             CameraMovementSpeed *
+            deltaTime;
+
+        _tick +=
             deltaTime;
 
         if (KeyboardState.IsKeyDown(
@@ -170,7 +251,6 @@ public class Game : GameWindow
                 movementAmount;
         }
 
-
         if (KeyboardState.IsKeyDown(
             Keys.Space))
         {
@@ -207,15 +287,99 @@ public class Game : GameWindow
     {
         base.OnRenderFrame(args);
 
-        // Clear the color buffer so the old image disappears.
+        // First pass, render the room from the fixed portal camera into an off screen framebuffer.
+        RenderPortalTexture();
+
+        // Second pass, switch back to the normal window framebuffer.
+        GL.BindFramebuffer(
+            FramebufferTarget.Framebuffer,
+            0);
+
+        GL.Viewport(
+            0,
+            0,
+            ClientSize.X,
+            ClientSize.Y);
+
         GL.Clear(
             ClearBufferMask.ColorBufferBit |
             ClearBufferMask.DepthBufferBit);
 
-        // Make the shader program active.
+        Matrix4 playerView =
+            _camera.GetViewMatrix();
+
+        Matrix4 playerProjection =
+            _camera.GetProjectionMatrix();
+
+        RenderScene(
+            playerView,
+            playerProjection);
+
+        // Draw the textured portal surface after the room.
+        DrawPortalSurface(
+            playerView,
+            playerProjection);
+
+        // Aaand to the screen
+        SwapBuffers();
+    }
+
+    protected override void OnResize(
+        ResizeEventArgs e)
+    {
+        base.OnResize(e);
+
+        GL.Viewport(
+            0,
+            0,
+            e.Width,
+            e.Height);
+
+        if (_camera is not null &&
+            e.Height > 0)
+        {
+            _camera.AspectRatio =
+                e.Width / (float)e.Height;
+        }
+    }
+
+    // Render the room into the framebuffer texture.
+    private void RenderPortalTexture()
+    {
+        GL.BindFramebuffer(
+            FramebufferTarget.Framebuffer,
+            _portalFramebuffer);
+
+        // Viewport has to match the texture we're rendering into.
+        GL.Viewport(
+            0,
+            0,
+            PortalTextureWidth,
+            PortalTextureHeight);
+
+        GL.Clear(
+            ClearBufferMask.ColorBufferBit |
+            ClearBufferMask.DepthBufferBit);
+
+        Matrix4 portalView =
+            _portalCamera.GetViewMatrix();
+
+        Matrix4 portalProjection =
+            _portalCamera.GetProjectionMatrix();
+
+        // RenderScene does not draw the portal itself... Recursion comes later.
+        RenderScene(
+            portalView,
+            portalProjection);
+    }
+
+    // Draw the room with whatever view/projection matrices are supplied.
+    private void RenderScene(
+        Matrix4 view,
+        Matrix4 projection)
+    {
         GL.UseProgram(_shaderProgram);
 
-        // Normalized direction from the surfaces toward the light source.
         Vector3 lightDirection =
             Vector3.Normalize(
                 new Vector3(-0.4f, 1.0f, 0.3f));
@@ -226,27 +390,16 @@ public class Game : GameWindow
             lightDirection.Y,
             lightDirection.Z);
 
-        // world space -> view space.
-        Matrix4 view =
-            _camera.GetViewMatrix();
-
-        // View space -> clip space with perspective.
-        Matrix4 projection =
-            _camera.GetProjectionMatrix();
-
-        // Send the view matrix into the shader uniform named "view".
         GL.UniformMatrix4(
             _viewLocation,
             true,
             ref view);
 
-        // Send the projection matrix into the shader uniform named "projection".
         GL.UniformMatrix4(
             _projectionLocation,
             true,
             ref projection);
 
-        // Bind our VAO. OpenGL now knows which VAO to use (mine, of course)
         GL.BindVertexArray(
             _vertexArrayObject);
 
@@ -273,77 +426,118 @@ public class Game : GameWindow
             new Vector3(6.0f, 1.5f, 0.0f),
             new Vector3(0.25f, 6.0f, 12.0f));
 
-        // Cube!!!
+        // Crazy cube ahead.
+        float floatingCubeHeight =
+            0.5f +
+            MathF.Cos(_tick) *
+            1.25f;
+
+        // Y rotates at full tick speed.
+        // X rotates at half the Y axis speed.
+        Vector3 floatingCubeRotation =
+            new Vector3(
+                _tick * 0.5f,
+                _tick,
+                0.0f);
+
         DrawObject(
-            new Vector3(-2.5f, -0.75f, -2.5f),
-            new Vector3(1.5f, 1.5f, 1.5f));
-
-        // Ceiling reaching cube
-        DrawObject(
-            new Vector3(2.5f, 0.0f, -3.5f),
-            new Vector3(1.0f, 3.0f, 1.0f));
-
-        // Elongated cube
-        DrawObject(
-            new Vector3(2.0f, -1.0f, 1.5f),
-            new Vector3(3.0f, 1.0f, 1.5f));
-
-        // Miniscule cube
-        DrawObject(
-            new Vector3(-3.5f, -1.1f, 2.0f),
-            new Vector3(0.8f, 0.8f, 0.8f));
-
-        // Aand to the screen
-        SwapBuffers();
-    }
-
-    // Called whenever the window changes size.
-    protected override void OnResize(
-        ResizeEventArgs e)
-    {
-        base.OnResize(e);
-
-        // Tell OpenGL how large the drawable viewport is.
-        GL.Viewport(
-            0,
-            0,
-            e.Width,
-            e.Height);
-
-        // The projection matrix must use the new width/height ratio
-        // or the 3D scene will stretch when the window changes shape
-        if (_camera is not null &&
-            e.Height > 0)
-        {
-            _camera.AspectRatio =
-                e.Width / (float)e.Height;
-        }
+            new Vector3(
+                0.0f,
+                floatingCubeHeight,
+                0.0f),
+            new Vector3(
+                1.5f,
+                1.5f,
+                1.5f),
+            floatingCubeRotation);
     }
 
     // I'm beginning to tire of the word matrix-
 
-    // Reuse the same VAO/VBO/EBO and only change the model matrix.
+    // Convenience version for objects that do NOT rotate. Eg walls.
     private void DrawObject(
         Vector3 position,
         Vector3 scale)
     {
-        // scale * translation gives us the object transform I want.
+        DrawObject(
+            position,
+            scale,
+            Vector3.Zero);
+    }
+
+    // Reuse the same VAO/VBO/EBO and only change the model matrix.
+    private void DrawObject(
+        Vector3 position,
+        Vector3 scale,
+        Vector3 rotation)
+    {
+        // Matrix matrix matrix... At least this handles rotation for me.
         Matrix4 model =
             Matrix4.CreateScale(scale) *
+            Matrix4.CreateRotationX(rotation.X) *
+            Matrix4.CreateRotationY(rotation.Y) *
+            Matrix4.CreateRotationZ(rotation.Z) *
             Matrix4.CreateTranslation(position);
 
-        // Send this objects model matrix to the shader.
         GL.UniformMatrix4(
             _modelLocation,
             true,
             ref model);
 
-        // Draw 36 indices as triangles.
-        // 6*2 = 12 tris
-        // 12*3 = 36 indices
         GL.DrawElements(
             PrimitiveType.Triangles,
             36,
+            DrawElementsType.UnsignedInt,
+            0);
+    }
+
+    // Draw the textured rectangle that is currently our fake portal.
+    private void DrawPortalSurface(
+        Matrix4 view,
+        Matrix4 projection)
+    {
+        GL.UseProgram(_portalShaderProgram);
+
+        // Put it slightly in front of the back wall to avoid z fighting.
+        Matrix4 portalModel =
+            Matrix4.CreateScale(
+                2.0f,
+                3.0f,
+                1.0f)
+            *
+            Matrix4.CreateTranslation(
+                0.0f,
+                0.0f,
+                -5.85f);
+
+        GL.UniformMatrix4(
+            _portalModelLocation,
+            true,
+            ref portalModel);
+
+        GL.UniformMatrix4(
+            _portalViewLocation,
+            true,
+            ref view);
+
+        GL.UniformMatrix4(
+            _portalProjectionLocation,
+            true,
+            ref projection);
+
+        GL.ActiveTexture(
+            TextureUnit.Texture0);
+
+        GL.BindTexture(
+            TextureTarget.Texture2D,
+            _portalColorTexture);
+
+        GL.BindVertexArray(
+            _portalVertexArrayObject);
+
+        GL.DrawElements(
+            PrimitiveType.Triangles,
+            6,
             DrawElementsType.UnsignedInt,
             0);
     }
@@ -403,48 +597,36 @@ public class Game : GameWindow
             20, 21, 22,  22, 23, 20  // Top
         };
 
-        // Generate a new VAO handle.
         _vertexArrayObject = GL.GenVertexArray();
-
-        // Bind it so the following vertex configuration is stored in this VAO.
         GL.BindVertexArray(_vertexArrayObject);
 
-        // Generate the VBO.
         _vertexBufferObject = GL.GenBuffer();
 
-        // Bind it as the current vertex-array-data buffer.
         GL.BindBuffer(
             BufferTarget.ArrayBuffer,
             _vertexBufferObject);
 
-        // Upload the C# vertex array into the currently bound VBO.
         GL.BufferData(
             BufferTarget.ArrayBuffer,
             vertices.Length * sizeof(float),
             vertices,
-            BufferUsageHint.StaticDraw); // This means WE DRAW THIS MANY TIMES, REMEMBER
+            BufferUsageHint.StaticDraw); // This means WE DRAW THIS SAME OBJECT (to clarify) MANY TIMES, REMEMBER
 
-        // Generate the index/element buffer.
         _elementBufferObject = GL.GenBuffer();
 
-        // Bind it while the VAO is active.
         GL.BindBuffer(
             BufferTarget.ElementArrayBuffer,
             _elementBufferObject);
 
-        // Upload the cubes triangle indices into the EBO.
         GL.BufferData(
             BufferTarget.ElementArrayBuffer,
             indices.Length * sizeof(uint),
             indices,
             BufferUsageHint.StaticDraw);
 
-        // Each complete vertex now contains 9 floats:
-        // 3 position + 3 color + 3 normal.
         int vertexStride =
             9 * sizeof(float);
 
-        // Configure vertex attribute 0 = POSITION.
         GL.VertexAttribPointer(
             0,
             3,
@@ -453,12 +635,8 @@ public class Game : GameWindow
             vertexStride,
             0);
 
-        // Enable shader input location 0.
         GL.EnableVertexAttribArray(0);
 
-        // Configure vertex attribute 1 = COLOR.
-
-        // The color starts after the 3rd float
         GL.VertexAttribPointer(
             1,
             3,
@@ -467,12 +645,8 @@ public class Game : GameWindow
             vertexStride,
             3 * sizeof(float));
 
-        // Enable shader input location 1.
         GL.EnableVertexAttribArray(1);
 
-        // Configure vertex attribute 2 = NORMAL.
-
-        // The normal starts after the 6th float
         GL.VertexAttribPointer(
             2,
             3,
@@ -481,40 +655,201 @@ public class Game : GameWindow
             vertexStride,
             6 * sizeof(float));
 
-        // Enable shader input location 2.
         GL.EnableVertexAttribArray(2);
 
-        // Unbind the VAO after setup.
         GL.BindVertexArray(0);
     }
 
-    // Compiles one GLSL shader.
+    // Dedicated portal rectangle with UV coordinates.
+    private void CreatePortalSurface()
+    {
+        float[] vertices =
+        {
+            // X      Y      Z       U     V
+            -0.5f,  -0.5f,  0.0f,   0.0f, 0.0f,
+             0.5f,  -0.5f,  0.0f,   1.0f, 0.0f,
+             0.5f,   0.5f,  0.0f,   1.0f, 1.0f,
+            -0.5f,   0.5f,  0.0f,   0.0f, 1.0f
+        };
+
+        uint[] indices =
+        {
+            0, 1, 2,
+            2, 3, 0
+        };
+
+        _portalVertexArrayObject =
+            GL.GenVertexArray();
+
+        GL.BindVertexArray(
+            _portalVertexArrayObject);
+
+        _portalVertexBufferObject =
+            GL.GenBuffer();
+
+        GL.BindBuffer(
+            BufferTarget.ArrayBuffer,
+            _portalVertexBufferObject);
+
+        GL.BufferData(
+            BufferTarget.ArrayBuffer,
+            vertices.Length * sizeof(float),
+            vertices,
+            BufferUsageHint.StaticDraw);
+
+        _portalElementBufferObject =
+            GL.GenBuffer();
+
+        GL.BindBuffer(
+            BufferTarget.ElementArrayBuffer,
+            _portalElementBufferObject);
+
+        GL.BufferData(
+            BufferTarget.ElementArrayBuffer,
+            indices.Length * sizeof(uint),
+            indices,
+            BufferUsageHint.StaticDraw);
+
+        int portalVertexStride =
+            5 * sizeof(float);
+
+        // Attribute 0 = position.
+        GL.VertexAttribPointer(
+            0,
+            3,
+            VertexAttribPointerType.Float,
+            false,
+            portalVertexStride,
+            0);
+
+        GL.EnableVertexAttribArray(0);
+
+        // Attribute 1 = UV.
+        GL.VertexAttribPointer(
+            1,
+            2,
+            VertexAttribPointerType.Float,
+            false,
+            portalVertexStride,
+            3 * sizeof(float));
+
+        GL.EnableVertexAttribArray(1);
+
+        GL.BindVertexArray(0);
+    }
+
+    // Create the off-screen framebuffer whose color output is a texture.
+    private void CreatePortalFramebuffer()
+    {
+        _portalFramebuffer =
+            GL.GenFramebuffer();
+
+        GL.BindFramebuffer(
+            FramebufferTarget.Framebuffer,
+            _portalFramebuffer);
+
+        // COLOR ATTACHMENT.
+        _portalColorTexture =
+            GL.GenTexture();
+
+        GL.BindTexture(
+            TextureTarget.Texture2D,
+            _portalColorTexture);
+
+        GL.TexImage2D(
+            TextureTarget.Texture2D,
+            0,
+            PixelInternalFormat.Rgb,
+            PortalTextureWidth,
+            PortalTextureHeight,
+            0,
+            PixelFormat.Rgb,
+            PixelType.UnsignedByte,
+            IntPtr.Zero);
+
+        GL.TexParameter(
+            TextureTarget.Texture2D,
+            TextureParameterName.TextureMinFilter,
+            (int)TextureMinFilter.Linear);
+
+        GL.TexParameter(
+            TextureTarget.Texture2D,
+            TextureParameterName.TextureMagFilter,
+            (int)TextureMagFilter.Linear);
+
+        GL.TexParameter(
+            TextureTarget.Texture2D,
+            TextureParameterName.TextureWrapS,
+            (int)TextureWrapMode.ClampToEdge);
+
+        GL.TexParameter(
+            TextureTarget.Texture2D,
+            TextureParameterName.TextureWrapT,
+            (int)TextureWrapMode.ClampToEdge);
+
+        GL.FramebufferTexture2D(
+            FramebufferTarget.Framebuffer,
+            FramebufferAttachment.ColorAttachment0,
+            TextureTarget.Texture2D,
+            _portalColorTexture,
+            0);
+
+        _portalDepthRenderbuffer =
+            GL.GenRenderbuffer();
+
+        GL.BindRenderbuffer(
+            RenderbufferTarget.Renderbuffer,
+            _portalDepthRenderbuffer);
+
+        GL.RenderbufferStorage(
+            RenderbufferTarget.Renderbuffer,
+            RenderbufferStorage.DepthComponent24,
+            PortalTextureWidth,
+            PortalTextureHeight);
+
+        GL.FramebufferRenderbuffer(
+            FramebufferTarget.Framebuffer,
+            FramebufferAttachment.DepthAttachment,
+            RenderbufferTarget.Renderbuffer,
+            _portalDepthRenderbuffer);
+
+        FramebufferErrorCode framebufferStatus =
+            GL.CheckFramebufferStatus(
+                FramebufferTarget.Framebuffer);
+
+        if (framebufferStatus !=
+            FramebufferErrorCode.FramebufferComplete)
+        {
+            throw new Exception(
+                $"Portal framebuffer is incomplete: {framebufferStatus}");
+        }
+
+        GL.BindFramebuffer(
+            FramebufferTarget.Framebuffer,
+            0);
+    }
+
     private static int CompileShader(
         ShaderType type,
         string source)
     {
-        // Ask OpenGL to create an empty shader object of the requested type.
         int shader = GL.CreateShader(type);
 
-        // Give OpenGL the GLSL source code.
         GL.ShaderSource(shader, source);
-
-        // Ask the graphics driver to compile it.
         GL.CompileShader(shader);
 
-        // Query whether compilation succeeded.
         GL.GetShader(
             shader,
             ShaderParameter.CompileStatus,
             out int success);
 
-        // 0 means compilation failed.
         if (success == 0)
         {
-            // Get the drivers GLSL compiler error message...
-            string error = GL.GetShaderInfoLog(shader);
+            string error =
+                GL.GetShaderInfoLog(shader);
 
-            // Stop with a readable error, rather than continuing.
+            GL.DeleteShader(shader);
+
             throw new Exception(
                 $"{type} compilation failed:\n{error}");
         }
@@ -522,79 +857,82 @@ public class Game : GameWindow
         return shader;
     }
 
-    // Loads basic.vert and basic.frag, compiles them,
-    // links them together into one usable shader program,
-    // then removes the temporary individual shader objects.
-    private void CreateShaderProgram()
+    // Generic shader-program creator.
+    // I now have:
+    // - basic.vert/basic.frag for lit 3D objects
+    // - portal.vert/portal.frag for the framebuffer texture
+    private static int CreateShaderProgram(
+        string vertexShaderFile,
+        string fragmentShaderFile)
     {
-        // Read the vertex shader source from the copied build-output folder.
-        string vertexSource = File.ReadAllText(
-            Path.Combine(
-                AppContext.BaseDirectory,
-                "Shaders",
-                "basic.vert"));
+        string vertexSource =
+            File.ReadAllText(
+                Path.Combine(
+                    AppContext.BaseDirectory,
+                    "Shaders",
+                    vertexShaderFile));
 
-        // Read the fragment shader source.
-        string fragmentSource = File.ReadAllText(
-            Path.Combine(
-                AppContext.BaseDirectory,
-                "Shaders",
-                "basic.frag"));
+        string fragmentSource =
+            File.ReadAllText(
+                Path.Combine(
+                    AppContext.BaseDirectory,
+                    "Shaders",
+                    fragmentShaderFile));
 
-        // Compile the vertex shader.
-        int vertexShader = CompileShader(
-            ShaderType.VertexShader,
-            vertexSource);
+        int vertexShader =
+            CompileShader(
+                ShaderType.VertexShader,
+                vertexSource);
 
-        // Compile the fragment shader.
-        int fragmentShader = CompileShader(
-            ShaderType.FragmentShader,
-            fragmentSource);
+        int fragmentShader =
+            CompileShader(
+                ShaderType.FragmentShader,
+                fragmentSource);
 
-        // Create an empty shader program.
-        _shaderProgram = GL.CreateProgram();
+        int shaderProgram =
+            GL.CreateProgram();
 
-        // Attach the compiled vertex shader to the program.
         GL.AttachShader(
-            _shaderProgram,
+            shaderProgram,
             vertexShader);
 
-        // Attach the compiled fragment shader.
         GL.AttachShader(
-            _shaderProgram,
+            shaderProgram,
             fragmentShader);
 
-        // Link the stages together.
-        GL.LinkProgram(_shaderProgram);
+        GL.LinkProgram(
+            shaderProgram);
 
-        // Check whether linking succeeded.
         GL.GetProgram(
-            _shaderProgram,
+            shaderProgram,
             GetProgramParameterName.LinkStatus,
             out int success);
 
         if (success == 0)
         {
-            // Retrieve the error message again.
             string error =
                 GL.GetProgramInfoLog(
-                    _shaderProgram);
+                    shaderProgram);
+
+            GL.DeleteShader(vertexShader);
+            GL.DeleteShader(fragmentShader);
+            GL.DeleteProgram(shaderProgram);
 
             throw new Exception(
                 $"Shader linking failed:\n{error}");
         }
 
-        // Once the program is successfully linked, the individual shader objects no longer need to stay attached.
         GL.DetachShader(
-            _shaderProgram,
+            shaderProgram,
             vertexShader);
 
         GL.DetachShader(
-            _shaderProgram,
+            shaderProgram,
             fragmentShader);
 
-        // Delete the temporary compiled shader objects.
         GL.DeleteShader(vertexShader);
         GL.DeleteShader(fragmentShader);
+
+        return shaderProgram;
     }
 }
