@@ -30,6 +30,13 @@ public class Game : GameWindow
     private int _viewLocation;
     private int _projectionLocation;
     private int _lightDirectionLocation;
+    private int _objectScaleLocation;
+    private int _objectTextureLocation;
+
+    // Textures for the current room objects.
+    private int _paddingTexture;
+    private int _friendlinessCubeTexture;
+    private int _hiTechFloorTexture;
 
     // Separate mesh used only for the portal surface.
     private int _portalVertexArrayObject;
@@ -122,6 +129,18 @@ public class Game : GameWindow
                 _shaderProgram,
                 "lightDirection");
 
+        // Lets basic.vert calculate how many texture tiles fit across each face.
+        _objectScaleLocation =
+            GL.GetUniformLocation(
+                _shaderProgram,
+                "objectScale");
+
+        // Texture sampler used by normal room objects.
+        _objectTextureLocation =
+            GL.GetUniformLocation(
+                _shaderProgram,
+                "objectTexture");
+
         _portalModelLocation =
             GL.GetUniformLocation(
                 _portalShaderProgram,
@@ -142,6 +161,13 @@ public class Game : GameWindow
                 _portalShaderProgram,
                 "portalTexture");
 
+        // Normal object textures use texture unit 0 too.
+        GL.UseProgram(_shaderProgram);
+
+        GL.Uniform1(
+            _objectTextureLocation,
+            0);
+
         // Tell the portal shader that portalTexture uses texture unit 0.
         GL.UseProgram(_portalShaderProgram);
 
@@ -150,6 +176,19 @@ public class Game : GameWindow
             0);
 
         GL.UseProgram(0);
+
+        // One complete source image = one complete 1x1 block face.
+        _paddingTexture =
+            TextureLoader.LoadTexture(
+                "padding.png");
+
+        _friendlinessCubeTexture =
+            TextureLoader.LoadTexture(
+                "friendlinessCube.png");
+
+        _hiTechFloorTexture =
+            TextureLoader.LoadTexture(
+                "hiTechFloor.png");
 
         CreatePortalFramebuffer();
 
@@ -186,6 +225,11 @@ public class Game : GameWindow
 
         GL.DeleteProgram(_shaderProgram);
         GL.DeleteProgram(_portalShaderProgram);
+
+        // Delete the normal material textures.
+        GL.DeleteTexture(_paddingTexture);
+        GL.DeleteTexture(_friendlinessCubeTexture);
+        GL.DeleteTexture(_hiTechFloorTexture);
 
         GL.DeleteRenderbuffer(_portalDepthRenderbuffer);
         GL.DeleteTexture(_portalColorTexture);
@@ -409,22 +453,26 @@ public class Game : GameWindow
         // Flöör
         DrawObject(
             new Vector3(0.0f, -1.5f, 0.0f),
-            new Vector3(12.0f, 0.25f, 12.0f));
+            new Vector3(12.0f, 0.25f, 12.0f),
+            _hiTechFloorTexture);
 
         // Back wall
         DrawObject(
             new Vector3(0.0f, 1.5f, -6.0f),
-            new Vector3(12.0f, 6.0f, 0.25f));
+            new Vector3(12.0f, 6.0f, 0.25f),
+            _paddingTexture);
 
         // Left wall
         DrawObject(
             new Vector3(-6.0f, 1.5f, 0.0f),
-            new Vector3(0.25f, 6.0f, 12.0f));
+            new Vector3(0.25f, 6.0f, 12.0f),
+            _paddingTexture);
 
         // Right wall
         DrawObject(
             new Vector3(6.0f, 1.5f, 0.0f),
-            new Vector3(0.25f, 6.0f, 12.0f));
+            new Vector3(0.25f, 6.0f, 12.0f),
+            _paddingTexture);
 
         // Crazy cube ahead.
         float floatingCubeHeight =
@@ -445,11 +493,9 @@ public class Game : GameWindow
                 0.0f,
                 floatingCubeHeight,
                 0.0f),
-            new Vector3(
-                1.5f,
-                1.5f,
-                1.5f),
-            floatingCubeRotation);
+            Vector3.One,
+            floatingCubeRotation,
+            _friendlinessCubeTexture);
     }
 
     // I'm beginning to tire of the word matrix-
@@ -457,19 +503,22 @@ public class Game : GameWindow
     // Convenience version for objects that do NOT rotate. Eg walls.
     private void DrawObject(
         Vector3 position,
-        Vector3 scale)
+        Vector3 scale,
+        int texture)
     {
         DrawObject(
             position,
             scale,
-            Vector3.Zero);
+            Vector3.Zero,
+            texture);
     }
 
     // Reuse the same VAO/VBO/EBO and only change the model matrix.
     private void DrawObject(
         Vector3 position,
         Vector3 scale,
-        Vector3 rotation)
+        Vector3 rotation,
+        int texture)
     {
         // Matrix matrix matrix... At least this handles rotation for me.
         Matrix4 model =
@@ -483,6 +532,20 @@ public class Game : GameWindow
             _modelLocation,
             true,
             ref model);
+
+        // Send the original object dimensions so the shader can repeat by world size.
+        GL.Uniform3(
+            _objectScaleLocation,
+            MathF.Abs(scale.X),
+            MathF.Abs(scale.Y),
+            MathF.Abs(scale.Z));
+
+        GL.ActiveTexture(
+            TextureUnit.Texture0);
+
+        GL.BindTexture(
+            TextureTarget.Texture2D,
+            texture);
 
         GL.DrawElements(
             PrimitiveType.Triangles,
@@ -549,42 +612,43 @@ public class Game : GameWindow
         float[] vertices =
         {
             // X Y Z, R G B, Normals! (X Y Z)
+            // U V added at the end for tiling textures.
 
             // Front (+Z)
-            -0.5f, -0.5f,  0.5f,        0.2f, 0.5f, 1.0f,       0.0f,  0.0f,  1.0f,
-             0.5f, -0.5f,  0.5f,        0.2f, 0.5f, 1.0f,       0.0f,  0.0f,  1.0f,
-             0.5f,  0.5f,  0.5f,        0.2f, 0.5f, 1.0f,       0.0f,  0.0f,  1.0f,
-            -0.5f,  0.5f,  0.5f,        0.2f, 0.5f, 1.0f,       0.0f,  0.0f,  1.0f,
+            -0.5f, -0.5f,  0.5f,        0.2f, 0.5f, 1.0f,       0.0f,  0.0f,  1.0f,     0.0f, 1.0f,
+             0.5f, -0.5f,  0.5f,        0.2f, 0.5f, 1.0f,       0.0f,  0.0f,  1.0f,     1.0f, 1.0f,
+             0.5f,  0.5f,  0.5f,        0.2f, 0.5f, 1.0f,       0.0f,  0.0f,  1.0f,     1.0f, 0.0f,
+            -0.5f,  0.5f,  0.5f,        0.2f, 0.5f, 1.0f,       0.0f,  0.0f,  1.0f,     0.0f, 0.0f,
 
             // Back (-Z)
-             0.5f, -0.5f, -0.5f,        0.8f, 0.2f, 0.2f,       0.0f,  0.0f, -1.0f,
-            -0.5f, -0.5f, -0.5f,        0.8f, 0.2f, 0.2f,       0.0f,  0.0f, -1.0f,
-            -0.5f,  0.5f, -0.5f,        0.8f, 0.2f, 0.2f,       0.0f,  0.0f, -1.0f,
-             0.5f,  0.5f, -0.5f,        0.8f, 0.2f, 0.2f,       0.0f,  0.0f, -1.0f,
+             0.5f, -0.5f, -0.5f,        0.8f, 0.2f, 0.2f,       0.0f,  0.0f, -1.0f,     0.0f, 1.0f,
+            -0.5f, -0.5f, -0.5f,        0.8f, 0.2f, 0.2f,       0.0f,  0.0f, -1.0f,     1.0f, 1.0f,
+            -0.5f,  0.5f, -0.5f,        0.8f, 0.2f, 0.2f,       0.0f,  0.0f, -1.0f,     1.0f, 0.0f,
+             0.5f,  0.5f, -0.5f,        0.8f, 0.2f, 0.2f,       0.0f,  0.0f, -1.0f,     0.0f, 0.0f,
 
             // Left (-X)
-            -0.5f, -0.5f, -0.5f,        0.2f, 0.8f, 0.3f,      -1.0f,  0.0f,  0.0f,
-            -0.5f, -0.5f,  0.5f,        0.2f, 0.8f, 0.3f,      -1.0f,  0.0f,  0.0f,
-            -0.5f,  0.5f,  0.5f,        0.2f, 0.8f, 0.3f,      -1.0f,  0.0f,  0.0f,
-            -0.5f,  0.5f, -0.5f,        0.2f, 0.8f, 0.3f,      -1.0f,  0.0f,  0.0f,
+            -0.5f, -0.5f, -0.5f,        0.2f, 0.8f, 0.3f,      -1.0f,  0.0f,  0.0f,     0.0f, 1.0f,
+            -0.5f, -0.5f,  0.5f,        0.2f, 0.8f, 0.3f,      -1.0f,  0.0f,  0.0f,     1.0f, 1.0f,
+            -0.5f,  0.5f,  0.5f,        0.2f, 0.8f, 0.3f,      -1.0f,  0.0f,  0.0f,     1.0f, 0.0f,
+            -0.5f,  0.5f, -0.5f,        0.2f, 0.8f, 0.3f,      -1.0f,  0.0f,  0.0f,     0.0f, 0.0f,
 
             // Right (+X)
-             0.5f, -0.5f,  0.5f,        1.0f, 0.5f, 0.2f,       1.0f,  0.0f,  0.0f,
-             0.5f, -0.5f, -0.5f,        1.0f, 0.5f, 0.2f,       1.0f,  0.0f,  0.0f,
-             0.5f,  0.5f, -0.5f,        1.0f, 0.5f, 0.2f,       1.0f,  0.0f,  0.0f,
-             0.5f,  0.5f,  0.5f,        1.0f, 0.5f, 0.2f,       1.0f,  0.0f,  0.0f,
+             0.5f, -0.5f,  0.5f,        1.0f, 0.5f, 0.2f,       1.0f,  0.0f,  0.0f,     0.0f, 1.0f,
+             0.5f, -0.5f, -0.5f,        1.0f, 0.5f, 0.2f,       1.0f,  0.0f,  0.0f,     1.0f, 1.0f,
+             0.5f,  0.5f, -0.5f,        1.0f, 0.5f, 0.2f,       1.0f,  0.0f,  0.0f,     1.0f, 0.0f,
+             0.5f,  0.5f,  0.5f,        1.0f, 0.5f, 0.2f,       1.0f,  0.0f,  0.0f,     0.0f, 0.0f,
 
             // Bottom (-Y)
-            -0.5f, -0.5f, -0.5f,        0.6f, 0.3f, 0.8f,       0.0f, -1.0f,  0.0f,
-             0.5f, -0.5f, -0.5f,        0.6f, 0.3f, 0.8f,       0.0f, -1.0f,  0.0f,
-             0.5f, -0.5f,  0.5f,        0.6f, 0.3f, 0.8f,       0.0f, -1.0f,  0.0f,
-            -0.5f, -0.5f,  0.5f,        0.6f, 0.3f, 0.8f,       0.0f, -1.0f,  0.0f,
+            -0.5f, -0.5f, -0.5f,        0.6f, 0.3f, 0.8f,       0.0f, -1.0f,  0.0f,     0.0f, 1.0f,
+             0.5f, -0.5f, -0.5f,        0.6f, 0.3f, 0.8f,       0.0f, -1.0f,  0.0f,     1.0f, 1.0f,
+             0.5f, -0.5f,  0.5f,        0.6f, 0.3f, 0.8f,       0.0f, -1.0f,  0.0f,     1.0f, 0.0f,
+            -0.5f, -0.5f,  0.5f,        0.6f, 0.3f, 0.8f,       0.0f, -1.0f,  0.0f,     0.0f, 0.0f,
 
             // Top (+Y)
-            -0.5f,  0.5f,  0.5f,        0.8f, 0.8f, 0.8f,       0.0f,  1.0f,  0.0f,
-             0.5f,  0.5f,  0.5f,        0.8f, 0.8f, 0.8f,       0.0f,  1.0f,  0.0f,
-             0.5f,  0.5f, -0.5f,        0.8f, 0.8f, 0.8f,       0.0f,  1.0f,  0.0f,
-            -0.5f,  0.5f, -0.5f,        0.8f, 0.8f, 0.8f,       0.0f,  1.0f,  0.0f
+            -0.5f,  0.5f,  0.5f,        0.8f, 0.8f, 0.8f,       0.0f,  1.0f,  0.0f,     0.0f, 1.0f,
+             0.5f,  0.5f,  0.5f,        0.8f, 0.8f, 0.8f,       0.0f,  1.0f,  0.0f,     1.0f, 1.0f,
+             0.5f,  0.5f, -0.5f,        0.8f, 0.8f, 0.8f,       0.0f,  1.0f,  0.0f,     1.0f, 0.0f,
+            -0.5f,  0.5f, -0.5f,        0.8f, 0.8f, 0.8f,       0.0f,  1.0f,  0.0f,     0.0f, 0.0f
         };
 
         uint[] indices =
@@ -624,8 +688,9 @@ public class Game : GameWindow
             indices,
             BufferUsageHint.StaticDraw);
 
+        // 3 position + 3 color + 3 normal + 2 UV.
         int vertexStride =
-            9 * sizeof(float);
+            11 * sizeof(float);
 
         GL.VertexAttribPointer(
             0,
@@ -656,6 +721,17 @@ public class Game : GameWindow
             6 * sizeof(float));
 
         GL.EnableVertexAttribArray(2);
+
+        // Attribute 3 = UV.
+        GL.VertexAttribPointer(
+            3,
+            2,
+            VertexAttribPointerType.Float,
+            false,
+            vertexStride,
+            9 * sizeof(float));
+
+        GL.EnableVertexAttribArray(3);
 
         GL.BindVertexArray(0);
     }

@@ -2,11 +2,13 @@
 
 in vec3 vertexColor;
 in vec3 worldNormal;
+in vec2 textureCoordinate;
 
 out vec4 FragColor;
 
 // Direction from the surface toward the directional light source.
 uniform vec3 lightDirection;
+uniform sampler2D objectTexture;
 
 void main()
 {
@@ -35,12 +37,17 @@ void main()
         ambientStrength +
         diffuseStrength * 0.80;
 
+    vec4 textureColor =
+        texture(
+            objectTexture,
+            textureCoordinate);
+
     vec3 finalColor =
-        vertexColor *
+        textureColor.rgb *
         brightness;
 
     FragColor =
         vec4(
             finalColor,
-            1.0);
+            textureColor.a);
 }
